@@ -171,7 +171,7 @@ describe( 'passport-saml /', function() {
             res.status(200).send("200 OK");
           });
         app.use(function (err, req, res, next) {
-          // console.log( err.stack );
+          console.log( err.stack );
           res.status(500).send('500 Internal Server Error');
         });
         server = app.listen(3033, function () {
@@ -213,8 +213,23 @@ describe( 'passport-saml /', function() {
     });
   });
 
-
   describe( 'captured SAML requests /', function() {
+    var logoutChecks = [
+      { name: "Logout",
+        config: {
+          entryPoint: 'https://idp.testshib.org/idp/profile/SAML2/Redirect/SSO',
+          cert: fs.readFileSync(__dirname + '/static/cert.pem', 'ascii'),
+          identifierFormat: 'urn:oasis:names:tc:SAML:2.0:nameid-format:transient',
+          // decryptionPvk: fs.readFileSync(__dirname + '/static/testshib encryption pvk.pen')
+        },
+        samlRequest: {
+          SAMLRequest: fs.readFileSync(__dirname + '/static/logout_request_with_good_signature.xml', 'base64'),
+        },
+        expectedStatusCode: 200,
+        mockDate: '2014-06-02T17:48:56.820Z',
+      },
+    ];
+
     var capturedChecks = [
       { name: "Empty Config",
         config: {},
@@ -499,9 +514,15 @@ describe( 'passport-saml /', function() {
         var profile = null;
         passport.use( new SamlStrategy( config, function(_profile, done) {
             profile = _profile;
-            done(null, { id: profile.nameID } );
+            done(null, profile );
           })
         );
+
+        var userSerialized = false;
+        passport.serializeUser(function(user, done) {
+          userSerialized = true;
+          done(null, user);
+        });
 
         app.get( '/login',
           passport.authenticate( "saml", { samlFallback: 'login-request', session: false } ),
@@ -568,9 +589,100 @@ describe( 'passport-saml /', function() {
       };
     }
 
+    function testForCheckLogout( check ) {
+      return function( done ) {
+        var app = express();
+        app.use( bodyParser.urlencoded({extended: false}) );
+        app.use( passport.initialize() );
+        var config = check.config;
+        config.callbackUrl = 'http://localhost:3033/login';
+        config.entryPoint = 'https://wwwexampleIdp.com/saml';
+        var profile = null;
+        passport.use( new SamlStrategy( config, function(_profile, done) {
+            profile = _profile;
+            done(null, profile );
+          })
+        );
+
+        var userSerialized = false;
+        passport.serializeUser(function(user, done) {
+          userSerialized = true;
+          done(null, user);
+        });
+
+        app.post( '/login',
+          passport.authenticate( "saml"),
+          function(req, res) {
+            res.status(200).send("200 OK");
+          });
+
+        app.use( function( err, req, res, next ) {
+          console.log( err.stack );
+          res.status(500).send('500 Internal Server Error');
+        });
+
+        server = app.listen( 3033, function() {
+          var requestOpts = {
+            url: 'http://localhost:3033/login',
+            method: 'post',
+            form: check.samlRequest
+          };
+
+          request(requestOpts, function(err, response, body) {
+            try {
+              should.not.exist(err);
+
+              var encodedSamlRequest;
+              if ( check.config.authnRequestBinding === "HTTP-POST" ) {
+                response.statusCode.should.equal(200);
+                body.should.match(/<!DOCTYPE html>[^]*<input.*name="SAMLRequest"[^]*<\/html>/);
+                encodedSamlRequest = body.match( /<input.*name="SAMLRequest" value="([^"]*)"/ )[1];
+              } else {
+                response.statusCode.should.equal(302);
+                var query = response.headers.location.match( /^[^\?]*\?(.*)$/ )[1];
+                encodedSamlRequest = querystring.parse( query ).SAMLRequest;
+              }
+
+              var buffer = Buffer.from(encodedSamlRequest, 'base64');
+              if (check.config.skipRequestCompression)
+                helper(null, buffer);
+              else
+                zlib.inflateRaw( buffer, helper );
+
+              function helper(err, samlRequest) {
+                try {
+                  should.not.exist( err );
+                  parseString( samlRequest.toString(), function( err, doc ) {
+                    try {
+                      should.not.exist( err );
+                      delete doc['samlp:AuthnRequest']['$']["ID"];
+                      delete doc['samlp:AuthnRequest']['$']["IssueInstant"];
+                      doc.should.eql( check.result );
+                      done();
+                    } catch (err2) {
+                      done(err2);
+                    }
+                  });
+                } catch (err2) {
+                  done(err2);
+                }
+              }
+            } catch (err2) {
+              done(err2);
+            }
+          });
+        });
+      };
+    }
+
     for( var i = 0; i < capturedChecks.length; i++ ) {
       var check = capturedChecks[i];
       it( check.name, testForCheck( check ) );
+    }
+
+    for (var i = 0; i < logoutChecks.length; i++) {
+      var check = logoutChecks[i];
+      it(check.name, testForCheckLogout(check));
     }
 
     afterEach( function( done ) {
