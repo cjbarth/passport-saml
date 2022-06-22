@@ -4,13 +4,12 @@ import * as bodyParser from "body-parser";
 import * as passport from "passport";
 import { Profile, SamlConfig, Strategy as SamlStrategy } from "../src";
 import * as session from "express-session";
-// import request = require("request");
 import got from "got";
 import * as fs from "fs";
 import * as sinon from "sinon";
 import { StrategyOptions, VerifiedCallback } from "../src/types";
 import { expect } from "chai";
-import { Server } from "http";
+import { IncomingMessage, Server } from "http";
 import { CapturedCheck, TEST_CERT } from "./types";
 
 export const capturedSamlResponseChecks: CapturedCheck[] = [
@@ -152,42 +151,22 @@ describe("captured saml responses /", function () {
       });
 
       server = app.listen(3033, async function () {
-        const requestOpts = {
-          url: "http://localhost:3033/login",
-          method: "POST",
-          form: check.samlResponse,
-        };
-
         try {
-          const response = await got("https://google.com");
+          const response = await got.post("http://localhost:3033/login", {
+            json: check.samlResponse,
+          });
 
-          response.statusCode.should.equal(check.expectedStatusCode, response.body);
+          expect(response.statusCode).to.equal(check.expectedStatusCode, response.body);
           if (response.statusCode == 200) {
-            userSerialized.should.be.true;
-            if (check.expectedNameIDStartsWith)
-              profile!.nameID!.should.startWith(check.expectedNameIDStartsWith);
+            expect(userSerialized).to.be.true;
+            if (check.expectedNameIDStartsWith != null)
+              expect(profile.nameID.startsWith(check.expectedNameIDStartsWith)).to.be.true;
           }
         } catch (err) {
-          should.not.exist(err);
+          expect(err).to.not.exist;
         } finally {
           done();
         }
-
-        // TODO remove usage of request module
-        // request(requestOpts, function (err: Error | null, response: any, body: any) {
-        //   try {
-        //     should.not.exist(err);
-        //     response.statusCode.should.equal(check.expectedStatusCode, body);
-        //     if (response.statusCode == 200) {
-        //       userSerialized.should.be.true;
-        //       if (check.expectedNameIDStartsWith)
-        //         profile!.nameID!.should.startWith(check.expectedNameIDStartsWith);
-        //     }
-        //     done();
-        //   } catch (err2) {
-        //     done(err2);
-        //   }
-        // });
       });
     };
   }
@@ -233,52 +212,28 @@ describe("captured saml responses /", function () {
         res: express.Response,
         next: express.NextFunction
       ) {
-        // console.log( err.stack );
         res.status(500).send("500 Internal Server Error");
       });
       server = app.listen(3033, async function () {
-        const requestOpts = {
-          url: "http://localhost:3033/login",
-          method: "POST",
-          form: check.samlResponse,
-        };
-
         try {
-          const response = await got("https://google.com");
+          const response = await got.post("http://localhost:3033/login", {
+            json: check.samlResponse,
+          });
 
-          response.statusCode.should.equal(check.expectedStatusCode);
+          expect(response.statusCode).to.equal(check.expectedStatusCode, response.body);
           if (response.statusCode == 200) {
-            should.exist(passedRequest);
-            passedRequest!.url!.should.eql("/login");
-            passedRequest!.method!.should.eql("POST");
-            should(passedRequest!.body).match(check.samlResponse);
+            expect(passedRequest).to.exist;
+            expect(passedRequest!.url!).to.equal("/login");
+            expect(passedRequest!.method!).to.equal("POST");
+            expect(passedRequest!.body).to.deep.equal(check.samlResponse);
           } else {
-            should.not.exist(passedRequest);
+            expect(passedRequest).to.not.exist;
           }
         } catch (err) {
-          should.not.exist(err);
+          expect(err).to.not.exist;
         } finally {
           done();
         }
-
-        // TODO remove usage of request module
-        // request(requestOpts, function (err: any, response: any, body: any) {
-        //   try {
-        //     should.not.exist(err);
-        //     response.statusCode.should.equal(check.expectedStatusCode);
-        //     if (response.statusCode == 200) {
-        //       should.exist(passedRequest);
-        //       passedRequest!.url!.should.eql("/login");
-        //       passedRequest!.method!.should.eql("POST");
-        //       should(passedRequest!.body).match(check.samlResponse);
-        //     } else {
-        //       should.not.exist(passedRequest);
-        //     }
-        //     done();
-        //   } catch (err2) {
-        //     done(err2);
-        //   }
-        // });
       });
     };
   }

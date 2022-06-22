@@ -4,7 +4,7 @@ import * as bodyParser from "body-parser";
 import * as passport from "passport";
 import { Profile, Strategy as SamlStrategy } from "../src";
 import * as session from "express-session";
-import request = require("request");
+import got from "got";
 import * as zlib from "zlib";
 import * as querystring from "querystring";
 import { parseString } from "xml2js";
@@ -975,13 +975,7 @@ describe("captured SAML requests /", function () {
         }
       });
 
-      server = app.listen(3033, function () {
-        const requestOpts = {
-          url: "http://localhost:3033/login",
-          method: "get",
-          followRedirect: false,
-        };
-
+      server = app.listen(3033, async function () {
         function helper(err: Error | null, samlRequest: Buffer) {
           try {
             expect(err).to.not.exist;
@@ -1001,29 +995,34 @@ describe("captured SAML requests /", function () {
           }
         }
 
-        // TODO remove usage of request module
-        request(requestOpts, function (err: Error | null, response: any, body: any) {
-          try {
-            expect(err).to.not.exist;
+        try {
+          const response = await got.get("http://localhost:3033/login", {
+            followRedirect: false,
+          });
 
-            let encodedSamlRequest;
-            if (check.config.authnRequestBinding === "HTTP-POST") {
-              expect(response.statusCode).to.equal(200);
-              expect(body).to.match(/<!DOCTYPE html>[^]*<input.*name="SAMLRequest"[^]*<\/html>/);
-              encodedSamlRequest = body.match(/<input.*name="SAMLRequest" value="([^"]*)"/)[1];
-            } else {
-              expect(response.statusCode).to.equal(302);
-              const query = response.headers.location.match(/^[^?]*\?(.*)$/)[1];
-              encodedSamlRequest = querystring.parse(query).SAMLRequest;
-            }
-
-            const buffer = Buffer.from(encodedSamlRequest, "base64");
-            if (check.config.skipRequestCompression) helper(null, buffer);
-            else zlib.inflateRaw(buffer, helper);
-          } catch (err2) {
-            done(err2);
+          let encodedSamlRequest = "";
+          if (check.config.authnRequestBinding === "HTTP-POST") {
+            expect(response.statusCode).to.equal(200);
+            expect(response.body).to.match(
+              /<!DOCTYPE html>[^]*<input.*name="SAMLRequest"[^]*<\/html>/
+            );
+            encodedSamlRequest = response!.body!.match(
+              /<input.*name="SAMLRequest" value="([^"]*)"/
+            )![1];
+          } else {
+            expect(response.statusCode).to.equal(302);
+            const query = response!.headers!.location!.match(/^[^?]*\?(.*)$/)![1];
+            encodedSamlRequest = <string>querystring.parse(query).SAMLRequest;
           }
-        });
+
+          const buffer = Buffer.from(encodedSamlRequest, "base64");
+          if (check.config.skipRequestCompression) helper(null, buffer);
+          else zlib.inflateRaw(buffer, helper);
+        } catch (err) {
+          expect(err).to.not.exist;
+        } finally {
+          done();
+        }
       });
     };
   }
@@ -1074,13 +1073,7 @@ describe("captured SAML requests /", function () {
         }
       });
 
-      server = app.listen(3033, function () {
-        const requestOpts = {
-          url: "http://localhost:3033/logout",
-          method: "post",
-          form: check.samlRequest,
-        };
-
+      server = app.listen(3033, async function () {
         function helper(err: Error | null, samlResponse: any) {
           try {
             expect(err).to.not.exist;
@@ -1100,21 +1093,24 @@ describe("captured SAML requests /", function () {
           }
         }
 
-        // TODO remove usage of request module
-        request(requestOpts, function (this: any, err: any, response: any, body: any) {
-          try {
-            const encodedSamlResponse = querystring.parse(this.uri.query).SAMLResponse;
-            // An error will exist because the endpoint we're trying to log out of doesn't exist,
-            // but we can still test to make sure that everything is behaving as it should.
-            // should.not.exist(err);
+        try {
+          const response = await got.post("http://localhost:3033/logout", {
+            json: check.samlResponse,
+          });
+          // TODO, check to make sure that this `response.requestUrl` === `this.uri.query`
+          const encodedSamlResponse = querystring.parse(response.requestUrl).SAMLResponse;
+          // An error will exist because the endpoint we're trying to log out of doesn't exist,
+          // but we can still test to make sure that everything is behaving as it should.
+          // should.not.exist(err);
 
-            const buffer = Buffer.from(encodedSamlResponse as string, "base64");
-            if (check.config.skipRequestCompression) helper(null, buffer);
-            else zlib.inflateRaw(buffer, helper);
-          } catch (err2) {
-            done(err2);
-          }
-        });
+          const buffer = Buffer.from(encodedSamlResponse as string, "base64");
+          if (check.config.skipRequestCompression) helper(null, buffer);
+          else zlib.inflateRaw(buffer, helper);
+        } catch (err) {
+          expect(err).to.not.exist;
+        } finally {
+          done();
+        }
       });
     };
   }
