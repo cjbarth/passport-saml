@@ -7,7 +7,7 @@ import * as session from "express-session";
 import got from "got";
 import * as zlib from "zlib";
 import * as querystring from "querystring";
-import { parseString } from "xml2js";
+import { parseString, parseStringPromise } from "xml2js";
 import * as fs from "fs";
 import { AuthenticateOptions, VerifiedCallback } from "../src/types";
 import { expect } from "chai";
@@ -866,6 +866,7 @@ export const logoutChecks: CapturedCheck[] = [
   {
     name: "Logout",
     config: {
+      authnRequestBinding: "HTTP-POST",
       skipRequestCompression: true,
       entryPoint: "https://idp.testshib.org/idp/profile/SAML2/Redirect/SSO",
       cert: fs.readFileSync(__dirname + "/static/cert.pem", "ascii"),
@@ -1039,18 +1040,18 @@ describe("captured SAML requests /", function () {
       let profile: Profile;
       const strategy = new SamlStrategy(
         config,
-        function (_profile: Profile | null, done: VerifiedCallback) {
+        function (_profile: Profile | null, verificationDone: VerifiedCallback) {
           // for signon
           if (_profile) {
             profile = _profile;
-            done(null, profile);
+            verificationDone(null, profile);
           }
         },
-        function (_profile: Profile | null, done: VerifiedCallback) {
+        function (_profile: Profile | null, verificationDone: VerifiedCallback) {
           // for logout
           if (_profile) {
             profile = _profile;
-            done(null, profile);
+            verificationDone(null, profile);
           }
         }
       );
@@ -1074,28 +1075,10 @@ describe("captured SAML requests /", function () {
       });
 
       server = app.listen(3033, async function () {
-        function helper(err: Error | null, samlResponse: any) {
-          try {
-            expect(err).to.not.exist;
-            parseString(samlResponse.toString(), function (err, doc) {
-              try {
-                expect(err).to.not.exist;
-                delete doc["samlp:LogoutResponse"]["$"]["ID"];
-                delete doc["samlp:LogoutResponse"]["$"]["IssueInstant"];
-                expect(doc).to.deep.equal(check.result);
-                done();
-              } catch (err2) {
-                done(err2);
-              }
-            });
-          } catch (err2) {
-            done(err2);
-          }
-        }
-
         try {
           const response = await got.post("http://localhost:3033/logout", {
-            json: check.samlResponse,
+            body: JSON.stringify(check.samlRequest),
+            // followRedirect: false,
           });
           // TODO, check to make sure that this `response.requestUrl` === `this.uri.query`
           const encodedSamlResponse = querystring.parse(response.requestUrl).SAMLResponse;
@@ -1104,12 +1087,21 @@ describe("captured SAML requests /", function () {
           // should.not.exist(err);
 
           const buffer = Buffer.from(encodedSamlResponse as string, "base64");
-          if (check.config.skipRequestCompression) helper(null, buffer);
-          else zlib.inflateRaw(buffer, helper);
-        } catch (err) {
-          expect(err).to.not.exist;
-        } finally {
+          let samlResponse = buffer.toString();
+          if (!check.config.skipRequestCompression) {
+            samlResponse = zlib.inflateRawSync(buffer).toString();
+          }
+          const samlResponseDoc = await parseStringPromise(samlResponse);
+          //  try {
+          delete samlResponseDoc["samlp:LogoutResponse"]["$"]["ID"];
+          delete samlResponseDoc["samlp:LogoutResponse"]["$"]["IssueInstant"];
+          expect(samlResponseDoc).to.deep.equal(check.result);
           done();
+        } catch (err) {
+          done(err);
+          // expect(err).to.not.exist;
+          // } finally {
+          //   done();
         }
       });
     };
@@ -1117,12 +1109,12 @@ describe("captured SAML requests /", function () {
 
   for (let i = 0; i < capturedSamlRequestChecks.length; i++) {
     const check = capturedSamlRequestChecks[i];
-    it(check.name, testForCheck(check));
+    it("check - " + check.name, testForCheck(check));
   }
 
   for (let i = 0; i < logoutChecks.length; i++) {
     const check = logoutChecks[i];
-    it(check.name, testForCheckLogout(check));
+    it("check logout - " + check.name, testForCheckLogout(check));
   }
 
   afterEach(function (done) {
