@@ -78,7 +78,6 @@
     "eslint-plugin-prettier": "^4.0.0",
     "express": "^4.17.3",
     "express-session": "^1.17.3",
-    "got": "^11.8.5",
     "mocha": "^10.0.0",
     "nyc": "^15.1.0",
     "onchange": "^7.1.0",
