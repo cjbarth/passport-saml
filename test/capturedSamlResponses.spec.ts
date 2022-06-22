@@ -9,7 +9,7 @@ import * as fs from "fs";
 import * as sinon from "sinon";
 import { StrategyOptions, VerifiedCallback } from "../src/types";
 import { expect } from "chai";
-import { IncomingMessage, Server } from "http";
+import { Server } from "http";
 import { CapturedCheck, TEST_CERT } from "./types";
 
 export const capturedSamlResponseChecks: CapturedCheck[] = [
