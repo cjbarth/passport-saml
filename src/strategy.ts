@@ -256,6 +256,9 @@ export abstract class AbstractStrategy extends PassportStrategy {
   redirect(url: string, status?: number): void {
     super.redirect(url, status);
   }
+  success(user: any, info?: any): void {
+    super.success(user, info);
+  }
 }
 
 export class Strategy extends AbstractStrategy {

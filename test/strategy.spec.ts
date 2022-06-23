@@ -1,5 +1,6 @@
 "use strict";
 
+import type * as express from "express";
 import { expect } from "chai";
 import * as sinon from "sinon";
 import { Profile, SAML, SamlConfig, Strategy as SamlStrategy } from "../src";
@@ -26,30 +27,54 @@ describe("Strategy()", function () {
     let getAuthorizeUrlStub: sinon.SinonStub;
     let getLogoutResponseUrlStub: sinon.SinonStub;
     let getLogoutUrlAsyncStub: sinon.SinonStub;
-    let validatePostResponseAsync: sinon.SinonStub;
+    let validateRedirectAsyncStub: sinon.SinonStub;
+    let validatePostResponseAsyncStub: sinon.SinonStub;
+    let validatePostRequestAsyncStub: sinon.SinonStub;
     let errorStub: sinon.SinonStub;
     let redirectStub: sinon.SinonStub;
+    let successStub: sinon.SinonStub;
     let requestWithUser = {} as unknown as RequestWithUser;
+    let requestWithUserGetResponse = {} as unknown as RequestWithUser;
     let requestWithUserPostResponse = {} as unknown as RequestWithUser;
+    let requestWithUserPostRequest = {} as unknown as RequestWithUser;
+    let logoutSpy: sinon.SinonSpy;
 
     beforeEach(function () {
       getAuthorizeFormStub = sinon.stub(SAML.prototype, "getAuthorizeFormAsync").resolves();
       getAuthorizeUrlStub = sinon.stub(SAML.prototype, "getAuthorizeUrlAsync").resolves();
       getLogoutResponseUrlStub = sinon.stub(SAML.prototype, "getLogoutResponseUrl");
       getLogoutUrlAsyncStub = sinon.stub(SAML.prototype, "getLogoutUrlAsync").resolves();
-      validatePostResponseAsync = sinon
+      validateRedirectAsyncStub = sinon.stub(SAML.prototype, "validateRedirectAsync").resolves();
+      validatePostResponseAsyncStub = sinon
         .stub(SAML.prototype, "validatePostResponseAsync")
+        .resolves();
+      validatePostRequestAsyncStub = sinon
+        .stub(SAML.prototype, "validatePostRequestAsync")
         .resolves();
       errorStub = sinon.stub(SamlStrategy.prototype, "error");
       redirectStub = sinon.stub(SamlStrategy.prototype, "redirect");
+      successStub = sinon.stub(SamlStrategy.prototype, "success");
+      logoutSpy = sinon.spy();
 
       requestWithUser = {
-        logout: noop,
+        logout: logoutSpy,
+        res: { send: noop },
+      } as unknown as RequestWithUser;
+      requestWithUserGetResponse = {
+        query: { SAMLResponse: {} },
+        url: "https://www.example.com/?key=value",
+        logout: logoutSpy,
         res: { send: noop },
       } as unknown as RequestWithUser;
       requestWithUserPostResponse = {
         body: { SAMLResponse: {} },
-        logout: noop,
+        logout: logoutSpy,
+        res: { send: noop },
+      } as unknown as RequestWithUser;
+      requestWithUserPostRequest = {
+        body: { SAMLRequest: {} },
+        url: "https://www.example.com/?key=value",
+        logout: logoutSpy,
         res: { send: noop },
       } as unknown as RequestWithUser;
     });
@@ -59,9 +84,13 @@ describe("Strategy()", function () {
       getAuthorizeUrlStub.restore();
       getLogoutResponseUrlStub.restore();
       getLogoutUrlAsyncStub.restore();
-      validatePostResponseAsync.restore();
+      validateRedirectAsyncStub.restore();
+      validatePostResponseAsyncStub.restore();
+      validatePostRequestAsyncStub.restore();
       errorStub.restore();
       redirectStub.restore();
+      successStub.restore();
+      logoutSpy.resetHistory();
     });
 
     it("calls getAuthorizeForm when authnRequestBinding is HTTP-POST for login-request", function (done) {
@@ -117,24 +146,22 @@ describe("Strategy()", function () {
       });
     });
 
-    it("determines that logout was unsuccessful where user doesn't match", function (done) {
+    it("determines that logout was unsuccessful where user doesn't match, POST", function (done) {
       const strategy = new SamlStrategy(
-        { cert: FAKE_CERT },
-        function (_profile: Profile | null, done: VerifiedCallback) {
+        { cert: FAKE_CERT, passReqToCallback: true },
+        function (req: express.Request, _profile: Profile | null, cb: VerifiedCallback) {
           // for signon
-          if (_profile) {
-            done(null, { name: _profile.nameID });
-          }
+          cb(new Error("Logout shouldn't call signon."));
         },
-        function (_profile: Profile | null, done: VerifiedCallback) {
+        function (req: express.Request, _profile: Profile | null, cb: VerifiedCallback) {
           // for logout
           if (_profile) {
-            done(null, { name: _profile.nameID });
+            cb(null, { name: _profile.nameID });
           }
         }
       );
 
-      validatePostResponseAsync.resolves({
+      validatePostResponseAsyncStub.resolves({
         profile: {
           ID: "ID",
           issuer: "issuer",
@@ -163,28 +190,28 @@ describe("Strategy()", function () {
           false,
           sinon.match.func
         );
+        sinon.assert.calledOnce(getLogoutResponseUrlStub);
+        sinon.assert.calledOnce(logoutSpy);
         done();
       });
     });
 
-    it("determines that logout was successful where user matches", function (done) {
+    it("determines that logout was successful where user matches, GET", function (done) {
       const strategy = new SamlStrategy(
         { cert: FAKE_CERT },
-        function (_profile: Profile | null, done: VerifiedCallback) {
+        function (_profile: Profile | null, cb: VerifiedCallback) {
           // for signon
-          if (_profile) {
-            done(null, { name: _profile.nameID });
-          }
+          cb(new Error("Logout shouldn't call signon."));
         },
-        function (_profile: Profile | null, done: VerifiedCallback) {
+        function (_profile: Profile | null, cb: VerifiedCallback) {
           // for logout
           if (_profile) {
-            done(null, { name: _profile.nameID });
+            cb(null, { name: _profile.nameID });
           }
         }
       );
 
-      validatePostResponseAsync.resolves({
+      validateRedirectAsyncStub.resolves({
         profile: {
           ID: "ID",
           issuer: "issuer",
@@ -196,12 +223,14 @@ describe("Strategy()", function () {
 
       // Pretend we already loaded a users session from a cookie or something
       // by calling `strategy.authenticate` when the request comes in
-      requestWithUserPostResponse.user = {
+      requestWithUserGetResponse.user = {
         name: "some user",
       };
 
       // This returns immediately, but calls async functions; need to turn event loop
-      strategy.authenticate(requestWithUserPostResponse, {});
+      strategy.authenticate(requestWithUserGetResponse, {});
+
+      getLogoutResponseUrlStub.yields(null, requestWithUserGetResponse.url);
 
       setImmediate(() => {
         sinon.assert.notCalled(errorStub);
@@ -213,6 +242,49 @@ describe("Strategy()", function () {
           true,
           sinon.match.func
         );
+        sinon.assert.calledOnce(getLogoutResponseUrlStub);
+        sinon.assert.calledOnceWithMatch(redirectStub, requestWithUserGetResponse.url);
+        sinon.assert.calledOnce(logoutSpy);
+        done();
+      });
+    });
+
+    it("determines that signon was successful where user matches, POST", function (done) {
+      const strategy = new SamlStrategy(
+        { cert: FAKE_CERT },
+        function (_profile: Profile | null, cb: VerifiedCallback) {
+          // for signon
+          if (_profile) {
+            cb(null, { name: _profile.nameID });
+          }
+        },
+        function (_profile: Profile | null, cb: VerifiedCallback) {
+          // for logout
+          cb(new Error("Signon shouldn't call logout."));
+        }
+      );
+
+      validatePostRequestAsyncStub.resolves({
+        profile: {
+          ID: "ID",
+          issuer: "issuer",
+          nameID: "some user",
+          nameIDFormat: "nameIDFormat",
+        },
+      });
+
+      // Pretend we already loaded a users session from a cookie or something
+      // by calling `strategy.authenticate` when the request comes in
+      requestWithUserPostRequest.user = {
+        name: "some user",
+      };
+
+      // This returns immediately, but calls async functions; need to turn event loop
+      strategy.authenticate(requestWithUserPostRequest, {});
+
+      setImmediate(() => {
+        sinon.assert.notCalled(errorStub);
+        sinon.assert.calledOnceWithMatch(successStub, requestWithUserPostRequest.user, undefined);
         done();
       });
     });
@@ -254,14 +326,14 @@ describe("Strategy()", function () {
       const samlConfig: SamlConfig = { cert: FAKE_CERT };
       const signonVerify: VerifyWithoutRequest = function (
         _profile: Profile | null,
-        done: VerifiedCallback
+        cb: VerifiedCallback
       ): void {
         throw Error("This shouldn't be called to generate metadata");
       };
 
       const logoutVerify: VerifyWithoutRequest = function (
         _profile: Profile | null,
-        done: VerifiedCallback
+        cb: VerifiedCallback
       ): void {
         throw Error("This shouldn't be called to generate metadata");
       };
