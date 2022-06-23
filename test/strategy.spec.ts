@@ -1,5 +1,6 @@
 "use strict";
 
+import { expect } from "chai";
 import * as sinon from "sinon";
 import { Profile, SAML, SamlConfig, Strategy as SamlStrategy } from "../src";
 import { RequestWithUser, VerifiedCallback, VerifyWithoutRequest } from "../src/types";
@@ -8,10 +9,23 @@ import { FAKE_CERT } from "./types";
 const noop = () => undefined;
 
 describe("Strategy()", function () {
+  it("should require ctor `options` argument", function () {
+    // @ts-ignore
+    expect(() => new SamlStrategy(noop)).to.throw("Mandatory SAML options missing");
+  });
+
+  it("should require that `signonVerify` be a function", function () {
+    // @ts-ignore
+    expect(() => new SamlStrategy({}, {})).to.throw(
+      "SAML authentication strategy requires a verify function"
+    );
+  });
+
   describe("authenticate", function () {
     let getAuthorizeFormStub: sinon.SinonStub;
     let getAuthorizeUrlStub: sinon.SinonStub;
-    let getLogoutResponseUrl: sinon.SinonStub;
+    let getLogoutResponseUrlStub: sinon.SinonStub;
+    let getLogoutUrlAsyncStub: sinon.SinonStub;
     let validatePostResponseAsync: sinon.SinonStub;
     let errorStub: sinon.SinonStub;
     let redirectStub: sinon.SinonStub;
@@ -21,7 +35,8 @@ describe("Strategy()", function () {
     beforeEach(function () {
       getAuthorizeFormStub = sinon.stub(SAML.prototype, "getAuthorizeFormAsync").resolves();
       getAuthorizeUrlStub = sinon.stub(SAML.prototype, "getAuthorizeUrlAsync").resolves();
-      getLogoutResponseUrl = sinon.stub(SAML.prototype, "getLogoutResponseUrl");
+      getLogoutResponseUrlStub = sinon.stub(SAML.prototype, "getLogoutResponseUrl");
+      getLogoutUrlAsyncStub = sinon.stub(SAML.prototype, "getLogoutUrlAsync").resolves();
       validatePostResponseAsync = sinon
         .stub(SAML.prototype, "validatePostResponseAsync")
         .resolves();
@@ -42,13 +57,14 @@ describe("Strategy()", function () {
     afterEach(function () {
       getAuthorizeFormStub.restore();
       getAuthorizeUrlStub.restore();
-      getLogoutResponseUrl.restore();
+      getLogoutResponseUrlStub.restore();
+      getLogoutUrlAsyncStub.restore();
       validatePostResponseAsync.restore();
       errorStub.restore();
       redirectStub.restore();
     });
 
-    it("calls getAuthorizeForm when authnRequestBinding is HTTP-POST", function (done) {
+    it("calls getAuthorizeForm when authnRequestBinding is HTTP-POST for login-request", function (done) {
       const strategy = new SamlStrategy(
         {
           authnRequestBinding: "HTTP-POST",
@@ -68,7 +84,26 @@ describe("Strategy()", function () {
       });
     });
 
-    it("calls getAuthorizeUrl when authnRequestBinding is not HTTP-POST", function (done) {
+    it("calls getAuthorizeForm when authnRequestBinding is not HTTP-POST for logout-request", function (done) {
+      const strategy = new SamlStrategy(
+        {
+          cert: FAKE_CERT,
+        },
+        noop,
+        noop
+      );
+
+      // This returns immediately, but calls async functions; need to turn event loop
+      strategy.authenticate(requestWithUser, { samlFallback: "logout-request" });
+
+      setImmediate(() => {
+        sinon.assert.notCalled(errorStub);
+        sinon.assert.calledOnce(getLogoutUrlAsyncStub);
+        done();
+      });
+    });
+
+    it("calls getAuthorizeUrl when authnRequestBinding is not HTTP-POST for login-request", function (done) {
       const strategy = new SamlStrategy({ cert: FAKE_CERT }, noop, noop);
 
       // This returns immediately, but calls async functions; need to turn event loop
@@ -121,7 +156,7 @@ describe("Strategy()", function () {
       setImmediate(() => {
         sinon.assert.notCalled(errorStub);
         sinon.assert.calledOnceWithMatch(
-          getLogoutResponseUrl,
+          getLogoutResponseUrlStub,
           sinon.match.any,
           sinon.match.any,
           sinon.match.any,
@@ -171,7 +206,7 @@ describe("Strategy()", function () {
       setImmediate(() => {
         sinon.assert.notCalled(errorStub);
         sinon.assert.calledOnceWithMatch(
-          getLogoutResponseUrl,
+          getLogoutResponseUrlStub,
           sinon.match.any,
           sinon.match.any,
           sinon.match.any,
@@ -184,7 +219,21 @@ describe("Strategy()", function () {
   });
 
   describe("logout", function () {
-    const t = 1;
+    let getLogoutUrlAsyncStub: sinon.SinonStub;
+
+    beforeEach(function () {
+      getLogoutUrlAsyncStub = sinon.stub(SAML.prototype, "getLogoutUrlAsync").resolves();
+    });
+
+    afterEach(function () {
+      getLogoutUrlAsyncStub.restore();
+    });
+
+    it("should call through to get logout URL", function () {
+      // @ts-ignore
+      new SamlStrategy({ cert: FAKE_CERT }, noop, noop).logout({ query: "" });
+      sinon.assert.calledOnce(getLogoutUrlAsyncStub);
+    });
   });
 
   describe("generateServiceProviderMetadata", function () {
