@@ -115,7 +115,7 @@ export abstract class AbstractStrategy extends PassportStrategy {
           let logoutUser: User | undefined;
           try {
             logoutUser = await new Promise((resolve, reject) => {
-              const verifedCallback: VerifiedCallback = (err: Error | null, logoutUser?: User) => {
+              const verifiedCallback: VerifiedCallback = (err: Error | null, logoutUser?: User) => {
                 if (err) {
                   return reject(err);
                 }
@@ -123,9 +123,9 @@ export abstract class AbstractStrategy extends PassportStrategy {
               };
 
               if (this._passReqToCallback) {
-                (this._logoutVerify as VerifyWithRequest)(req, profile, verifedCallback);
+                (this._logoutVerify as VerifyWithRequest)(req, profile, verifiedCallback);
               } else {
-                (this._logoutVerify as VerifyWithoutRequest)(profile, verifedCallback);
+                (this._logoutVerify as VerifyWithoutRequest)(profile, verifiedCallback);
               }
             });
           } catch (err) {

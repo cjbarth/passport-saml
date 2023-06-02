@@ -93,7 +93,7 @@ export class MultiSamlStrategy extends AbstractStrategy {
     });
   }
 
-  // This is reduntant, but helps with testing
+  // This is redundant, but helps with testing
   error(err: Error): void {
     super.error(err);
   }

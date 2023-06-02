@@ -201,7 +201,7 @@ Please see the [type specification](https://github.com/node-saml/node-saml/blob/
 
 You need to provide a route corresponding to the `path` configuration parameter given to the strategy:
 
-The authentication callback must be invoked after the `body-parser` middlerware.
+The authentication callback must be invoked after the `body-parser` middleware.
 
 ```javascript
 const bodyParser = require("body-parser");
@@ -292,7 +292,7 @@ Formats supported for `privateKey` field are,
    (both versions work)
    See example from tests of the first version of [well formatted private key](test/static/acme_tools_com.key).
 
-1. Alternativelly a single line private key without start/end lines where all rows are joined into single line:
+1. Alternatively a single line private key without start/end lines where all rows are joined into single line:
 
    See example from tests of [singleline private key](test/static/singleline_acme_tools_com.key).
 
